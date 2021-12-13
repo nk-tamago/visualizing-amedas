@@ -69,16 +69,9 @@ const loadAmedas = async (option) => {
   }
 
   // アメダス気象情報データの読み取り
-  const fetchAmedasWeatherInformations = async () => {  
-    // 現在日時からアメダス気象情報取得パラメータを生成
-    const generateDateimeString = () => {
-      const nowTime = new Date()
-      nowTime.setHours((new Date()).getHours() -1)
-      //nowTime.setMonth((new Date()).getMonth() -4)
-      return nowTime.getFullYear().toString() + (nowTime.getMonth() + 1).toString().padStart(2, '0')  + nowTime.getDate().toString().padStart(2, '0')  + nowTime.getHours().toString().padStart(2, '0')  + "0000"
-    }
+  const fetchAmedasWeatherInformations = async (queryDatetime) => {  
 
-    const url = "https://www.jma.go.jp/bosai/amedas/data/map/" + generateDateimeString() + ".json"
+    const url = "https://www.jma.go.jp/bosai/amedas/data/map/" + queryDatetime + ".json"
 
     const res = await fetch(url)
     const json = await res.json()
@@ -87,53 +80,66 @@ const loadAmedas = async (option) => {
 
 
   // アメダス観測所からボロノイポリゴンを作成
-  const generateGeoJsonAmedasVoronoiPolygons = async (amedas, isClipping) => {
+  const generateGeoJsonAmedasVoronoiPolygons = async (amedas, option) => {
     const points = []
-      Object.keys(amedas).map( key => {
-        const item = amedas[key]
-        points.push(turf.point([item.lon, item.lat],{'key': key, 'kjName': item.kjName, 'knName': item.knName, 'alt': item.alt}))
-      })
-      const collection = turf.featureCollection(points)
-      const voronoiPolygons = turf.voronoi(collection, {bbox: turf.bbox(turf.buffer(collection, 50, {}))})
+    Object.keys(amedas).map( key => {
+      const item = amedas[key]
+      points.push(turf.point([item.lon, item.lat],{'key': key, 'kjName': item.kjName, 'knName': item.knName, 'alt': item.alt}))
+    })
+    const collection = turf.featureCollection(points)
+    const voronoiPolygons = turf.voronoi(collection, {bbox: turf.bbox(turf.buffer(collection, 50, {}))})
 
-      // アメダス観測所ポイントとボロノイポリゴンの内外判定を行い、観測所データをポリゴンへ移植
-      points.map( point => {
-        voronoiPolygons.features.some( polygon => {
-          if( turf.booleanPointInPolygon(point, polygon) === true ){
-            polygon.properties.key = point.properties.key
-            polygon.properties.kjName = point.properties.kjName
-            polygon.properties.knName = point.properties.knName
-            polygon.properties.alt = point.properties.alt
-            polygon.properties.lon = point.geometry.coordinates[0]
-            polygon.properties.lat = point.geometry.coordinates[1]
-            return true
-          }
-          return false
+    datetime = option.queryDatetime.match( /(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})/ )
+    // アメダス観測所ポイントとボロノイポリゴンの内外判定を行い、観測所データをポリゴンへ移植
+    points.map( point => {
+      voronoiPolygons.features.some( polygon => {
+        if( turf.booleanPointInPolygon(point, polygon) === true ){
+          polygon.properties.key = point.properties.key
+          polygon.properties.kjName = point.properties.kjName
+          polygon.properties.knName = point.properties.knName
+          polygon.properties.alt = point.properties.alt
+          polygon.properties.lon = point.geometry.coordinates[0]
+          polygon.properties.lat = point.geometry.coordinates[1]
+          polygon.properties.queryDatetime = datetime[1] + '-' + datetime[2] + '-' + datetime[3] + ' ' + datetime[4] + ':' + datetime[5] + ':' + datetime[6]
+          return true
+        }
+        return false
+      })
+    })
+
+    // ボロノイ図を陸地でクリッピング
+    if( option.isClipping === true) {
+      const dissolvePolygons = turf.dissolve(turf.buffer(collection, 30, {steps: 2}))
+      voronoiPolygons.features.map( voronoiPolygon => {
+        dissolvePolygons.features.some( dissolvePolygon => {
+          const intersectPolygon = turf.intersect(voronoiPolygon, dissolvePolygon)
+          if (!intersectPolygon){
+            return false
+          } 
+          voronoiPolygon.geometry = intersectPolygon.geometry
+          return true
         })
       })
+    }
 
-      if( isClipping === true) {
-        const dissolvePolygons = turf.dissolve(turf.buffer(collection, 30, {steps: 2}))
-        voronoiPolygons.features.map( voronoiPolygon => {
-          dissolvePolygons.features.some( dissolvePolygon => {
-            const intersectPolygon = turf.intersect(voronoiPolygon, dissolvePolygon)
-            if (!intersectPolygon){
-              return false
-            } 
-            voronoiPolygon.geometry = intersectPolygon.geometry
-            return true
-          })
-        })
-      }
-
-      return voronoiPolygons
+    return voronoiPolygons
   }
 
-  const amedasObservatories = await fetchAmedasObservatories()
-  const amedasWeatherInfos =  await fetchAmedasWeatherInformations()
-  const voronoiPolygons = await generateGeoJsonAmedasVoronoiPolygons(amedasObservatories, option.isClipping)
+      // 現在日時からアメダス気象情報取得パラメータを生成
+  const generateDateimeString = () => {
+    const nowTime = new Date()
+    nowTime.setHours((new Date()).getHours() -1)
+    //nowTime.setMonth((new Date()).getMonth() -4)
+    return nowTime.getFullYear().toString() + (nowTime.getMonth() + 1).toString().padStart(2, '0')  + nowTime.getDate().toString().padStart(2, '0')  + nowTime.getHours().toString().padStart(2, '0')  + "0000"
+  }
 
-  return {observatories: amedasObservatories, weatherInfos: amedasWeatherInfos, voronoiPolygons: voronoiPolygons }
+  const queryDatetime = generateDateimeString()
+
+  const amedasObservatories = await fetchAmedasObservatories()
+  const amedasWeatherInfos =  await fetchAmedasWeatherInformations(queryDatetime)
+  const voronoiPolygons = await generateGeoJsonAmedasVoronoiPolygons(amedasObservatories, {isclopping: option.isClipping, queryDatetime: queryDatetime})
+
+  return {observatories: amedasObservatories, weatherInfos: amedasWeatherInfos, voronoiPolygons: voronoiPolygons, queryDatetime: queryDatetime }
 }
 
 // Leaflet地図初期化
@@ -154,11 +160,15 @@ const initializeMainMap = () => {
     metric: true
   }).addTo(map)
 
-  return map
+  const controlLayers = L.control.layers({}, {},{collapsed: false}).addTo(map)
+
+  return { map: map, controlLayers: controlLayers }
 }
 
 // ベースマップ
-const initializeBaseMaps = (map) => {
+const initializeBaseMaps = (mainMap) => {
+  const map = mainMap.map
+  const controlLayers = mainMap.controlLayers
 
   // ベース地図の追加
   const osmDarkLayer = L.tileLayer('https://cartodb-basemaps-{s}.global.ssl.fastly.net/dark_all/{z}/{x}/{y}.png', {
@@ -199,13 +209,18 @@ const initializeBaseMaps = (map) => {
     '国土地理院(白地図)': gsiblankLayer
   }
 
+  // レイヤ切り替えコントール設定
+  Object.keys(baseMaps).map( key => {
+    controlLayers.addBaseLayer(baseMaps[key], key)
+  })
+
   return baseMaps
 }
 
 
-
 // パネルウインドウ
-const initializePanels = (map) => {
+const initializePanels = (mainMap) => {
+  const map = mainMap.map
   // 情報パネル
   const addInfoPanel = (lmap) => {
     const info = L.control()
@@ -217,7 +232,7 @@ const initializePanels = (map) => {
     info.update = (props) => {
       div.innerHTML = '<h4>Temperature</h4>' +  
         (props ?
-          '<b>' + props.kjName + '<br />' + props.knName + '</b><br />' + props.temp + ' ℃'
+          '<b>' + props.queryDatetime + '<br />' + props.kjName + '<br />' + props.knName + '</b><br />' + props.temp + ' ℃'
           : 'Hover over polygon'
         )
     }
@@ -252,7 +267,9 @@ const initializePanels = (map) => {
 
 
 // オーバーレイレイヤ
-const initializeOverlayMaps = (map, amedas, infoPanel) => {
+const initializeOverlayMaps = (mainMap, amedas, infoPanel) => {
+  const map = mainMap.map
+  const controlLayers = mainMap.controlLayers
 
   // アメダス観測所レイヤ
   const amedasObservatoryLayer = L.featureGroup([], {
@@ -320,21 +337,22 @@ const initializeOverlayMaps = (map, amedas, infoPanel) => {
     "気温": amedasTemperatureLayer
   }
 
+  // レイヤ切り替えコントール設定
+  Object.keys(overlayMaps).map( key => {
+    controlLayers.addOverlay(overlayMaps[key], key)
+  })
+
 return overlayMaps
 
 }
 
-
 // メイン
 const main = async () => {
   const amedas = await loadAmedas({isClipping: true})
-  const map = initializeMainMap()
-  const baseMaps = initializeBaseMaps(map)
-  const panels = initializePanels(map)
-  const overlayMaps = initializeOverlayMaps(map, amedas, panels.info)
-
-  // レイヤ切り替えコントール設定
-  L.control.layers(baseMaps, overlayMaps,{collapsed: false}).addTo(map)
+  const mainMap = initializeMainMap()
+  const panels = initializePanels(mainMap)
+  const baseMaps = initializeBaseMaps(mainMap)
+  const overlayMaps = initializeOverlayMaps(mainMap, amedas, panels.info)
 }
 
 main()
