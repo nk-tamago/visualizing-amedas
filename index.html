@@ -49,7 +49,7 @@ const getTemparatureColor = (temp) => {
 
 
 // アメダスデータの読み取り
-const loadAmedas = async (option) => {
+const fetchAmedasThenGenerateVoronoi = async (option) => {
 
   // アメダス観測所データの読み取り
   const fetchAmedasObservatories = async () => {
@@ -137,7 +137,7 @@ const loadAmedas = async (option) => {
 
   const amedasObservatories = await fetchAmedasObservatories()
   const amedasWeatherInfos =  await fetchAmedasWeatherInformations(queryDatetime)
-  const voronoiPolygons = await generateGeoJsonAmedasVoronoiPolygons(amedasObservatories, {isclopping: option.isClipping, queryDatetime: queryDatetime})
+  const voronoiPolygons = await generateGeoJsonAmedasVoronoiPolygons(amedasObservatories, {isClipping: option.isClipping, queryDatetime: queryDatetime})
 
   return {observatories: amedasObservatories, weatherInfos: amedasWeatherInfos, voronoiPolygons: voronoiPolygons, queryDatetime: queryDatetime }
 }
@@ -294,7 +294,7 @@ const initializeOverlayMaps = (mainMap, amedas, infoPanel) => {
 
           const style = {'color': '#000000', 'weight': 0.5, 'opacity': 1, 'fillOpacity': 0.8 }
           const weather = amedas.weatherInfos[layer.feature.properties.key]
-          if( weather.temp ) {
+          if( weather && weather.temp ) {
             style.fillColor = getTemparatureColor(weather.temp[0]).color
             layer.feature.properties.temp = weather.temp[0]
           } else  {
@@ -348,7 +348,7 @@ return overlayMaps
 
 // メイン
 const main = async () => {
-  const amedas = await loadAmedas({isClipping: true})
+  const amedas = await fetchAmedasThenGenerateVoronoi({isClipping: true})
   const mainMap = initializeMainMap()
   const panels = initializePanels(mainMap)
   const baseMaps = initializeBaseMaps(mainMap)
